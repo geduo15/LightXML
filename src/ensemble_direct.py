@@ -14,7 +14,7 @@ parser.add_argument('--dataset', type=str, required=False, default='eurlex4k')
 args = parser.parse_args()
 
 if __name__ == '__main__':
-    using_group = args.dataset in ['wiki500k', 'amazon670k']
+    using_group = args.dataset in ['wiki500k', 'amazon670k', 'eurlex4k']
     model_labels, model_scores = [], []
 
     models = [args.model1, args.model2, args.model3]

@@ -95,3 +95,13 @@ if __name__ == '__main__':
         for group in groups:
             new_group.append([mlb.classes_[i] for i in group])
         np.save(f'./data/Wiki-500K/label_group{args.id}.npy', np.array(new_group))
+    elif dataset == 'eurlex4k':
+        mlb = build_tree_by_level('./data/EUR-Lex/train.txt', 
+                                  './data/EUR-Lex/train_labels_id.txt',
+                                  1e-4, 100, [], './data/EUR-Lex/label_group'+args.id)
+        groups = np.load(f'./data/EUR-Lex/label_group{args.id}-last.npy', allow_pickle=True)
+        new_group = []
+        for group in groups:
+            new_group.append([mlb.classes_[i] for i in group])
+        np.save(f'./data/EUR-Lex/label_group{args.id}.npy', np.array(new_group))
+

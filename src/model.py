@@ -35,13 +35,14 @@ def get_bert(bert_name):
 class LightXML(nn.Module):
     def __init__(self, n_labels, group_y=None, bert='bert-base', feature_layers=5, dropout=0.5, update_count=1,
                  candidates_topk=10, 
-                 use_swa=True, swa_warmup_epoch=10, swa_update_step=200, hidden_dim=300):
+                 use_swa=True, swa_warmup_epoch=10, swa_update_step=200, hidden_dim=300, decouple=False):
         super(LightXML, self).__init__()
 
         self.use_swa = use_swa
         self.swa_warmup_epoch = swa_warmup_epoch
         self.swa_update_step = swa_update_step
         self.swa_state = {}
+        self.decouple = decouple
 
         self.update_count = update_count
 
@@ -52,6 +53,7 @@ class LightXML(nn.Module):
 
         self.bert_name, self.bert = bert, get_bert(bert)
         self.feature_layers, self.drop_out = feature_layers, nn.Dropout(dropout)
+        self.relu = nn.ReLU()
 
         self.group_y = group_y
         if self.group_y is not None:
@@ -59,8 +61,10 @@ class LightXML(nn.Module):
             print('hidden dim:',  hidden_dim)
             print('label goup numbers:',  self.group_y_labels)
 
+            self.rm = nn.utils.spectral_norm(nn.Linear(self.feature_layers*self.bert.config.hidden_size, self.feature_layers*self.bert.config.hidden_size))
             self.l0 = nn.Linear(self.feature_layers*self.bert.config.hidden_size, self.group_y_labels)
             # hidden bottle layer
+            self.re = nn.utils.spectral_norm(nn.Linear(self.feature_layers*self.bert.config.hidden_size, self.feature_layers*self.bert.config.hidden_size))
             self.l1 = nn.Linear(self.feature_layers*self.bert.config.hidden_size, hidden_dim)
             self.embed = nn.Embedding(n_labels, hidden_dim)
             nn.init.xavier_uniform_(self.embed.weight)
@@ -85,7 +89,7 @@ class LightXML(nn.Module):
         return indices, candidates, candidates_scores
 
     def forward(self, input_ids, attention_mask, token_type_ids,
-                labels=None, group_labels=None, candidates=None):
+                labels=None, group_labels=None, candidates=None, detach=False):
         is_training = labels is not None
 
         outs = self.bert(
@@ -96,7 +100,10 @@ class LightXML(nn.Module):
 
         out = torch.cat([outs[-i][:, 0] for i in range(1, self.feature_layers+1)], dim=-1)
         out = self.drop_out(out)
-        group_logits = self.l0(out)
+        if self.decouple:
+            group_logits = self.l0(self.relu(self.re(out)) + out)
+        else:
+            group_logits = self.l0(out)
         if self.group_y is None:
             logits = group_logits
             if is_training:
@@ -134,7 +141,12 @@ class LightXML(nn.Module):
             labels = torch.stack(new_labels).cuda()
         candidates, group_candidates_scores =  torch.LongTensor(candidates).cuda(), torch.Tensor(group_candidates_scores).cuda()
 
-        emb = self.l1(out)
+        if detach:
+            out = out.detach()
+        if self.decouple:
+            emb = self.l1(self.relu(self.rm(out)) + out)
+        else:
+            emb = self.l1(out)
         embed_weights = self.embed(candidates) # N, sampled_size, H
         emb = emb.unsqueeze(-1)
         logits = torch.bmm(embed_weights, emb).squeeze(-1)
@@ -145,7 +157,8 @@ class LightXML(nn.Module):
             return logits, loss
         else:
             candidates_scores = torch.sigmoid(logits)
-            candidates_scores = candidates_scores * group_candidates_scores
+            if not detach:
+                candidates_scores = candidates_scores * group_candidates_scores
             return group_logits, candidates, candidates_scores
 
     def save_model(self, path):
@@ -219,7 +232,7 @@ class LightXML(nn.Module):
         return total, acc1, acc3, acc5
 
     def one_epoch(self, epoch, dataloader, optimizer,
-                  mode='train', eval_loader=None, eval_step=20000, log=None):
+                  mode='train', eval_loader=None, eval_step=20000, log=None, detach=False):
 
         bar = tqdm.tqdm(total=len(dataloader))
         p1, p3, p5 = 0, 0, 0
@@ -254,6 +267,8 @@ class LightXML(nn.Module):
                     if self.group_y is not None:
                         inputs['group_labels'] = batch[4].cuda()
                         inputs['candidates'] = batch[5].cuda()
+                        inputs['detach'] = detach
+
 
                 outputs = self(**inputs)
 
@@ -269,7 +284,7 @@ class LightXML(nn.Module):
     
                     if step % self.update_count == 0:
                         optimizer.step()
-                        self.zero_grad()
+                        self.zero_grad(set_to_none=True)
 
                     if step % eval_step == 0 and eval_loader is not None and step != 0:
                         results = self.one_epoch(epoch, eval_loader, optimizer, mode='eval')
