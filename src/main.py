@@ -23,11 +23,16 @@ def load_group(dataset, group_tree=0):
         return np.load(f'./data/Amazon-670K/label_group{group_tree}.npy', allow_pickle=True)
     elif dataset == 'eurlex4k':
         return np.load(f'./data/Eurlex-4K/label_group{group_tree}.npy', allow_pickle=True)
+    elif dataset == 'wiki31k':
+        return np.load(f'./data/Wiki10-31K/label_group{group_tree}.npy', allow_pickle=True)
+    elif dataset == 'amazoncat13k':
+        return np.load(f'./data/AmazonCat-13K/label_group{group_tree}.npy', allow_pickle=True)
+    
 
 def train(model, df, label_map):
     tokenizer = model.get_tokenizer()
 
-    if args.dataset in ['wiki500k', 'amazon670k', 'eurlex4k']:
+    if args.dataset in ['wiki500k', 'amazon670k', 'eurlex4k', "amazoncat13k", "wiki31k"]:
         group_y = load_group(args.dataset, args.group_y_group)
         train_d = MDataset(df, 'train', tokenizer, label_map, args.max_len, group_y=group_y,
                            candidates_num=args.group_y_candidate_num)#, token_type_ids=token_type_ids)
@@ -65,16 +70,10 @@ def train(model, df, label_map):
     model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
 
     max_only_p5 = 0
-    Detach = False
     for epoch in range(0, args.epoch+5):
-        if (epoch < 0.25*(args.epoch+5) and args.detach):
-            Detach = True
-        else:
-            Detach = False
-
         train_loss = model.one_epoch(epoch, trainloader, optimizer, mode='train',
                                      eval_loader=validloader if args.valid else testloader,
-                                     eval_step=args.eval_step, log=LOG, detach=Detach)
+                                     eval_step=args.eval_step, log=LOG, detach=args.detach)
 
         if args.valid:
             ev_result = model.one_epoch(epoch, validloader, optimizer, mode='eval')
@@ -84,7 +83,7 @@ def train(model, df, label_map):
         g_p1, g_p3, g_p5, p1, p3, p5 = ev_result
 
         log_str = f'{epoch:>2}: {p1:.4f}, {p3:.4f}, {p5:.4f}, train_loss:{train_loss}'
-        if args.dataset in ['wiki500k', 'amazon670k', 'eurlex4k']:
+        if args.dataset in ['wiki500k', 'amazon670k', 'eurlex4k', "amazoncat13k", "wiki31k"]:
             log_str += f' {g_p1:.4f}, {g_p3:.4f}, {g_p5:.4f}'
         if args.valid:
             log_str += ' valid'
@@ -100,9 +99,9 @@ def train(model, df, label_map):
 
 def get_exp_name():
     name = [args.dataset, '' if args.bert == 'bert-base' else args.bert]
-    if args.dataset in ['wiki500k', 'amazon670k', 'eurlex4k']:
+    if args.dataset in ['wiki500k', 'amazon670k', 'eurlex4k', "amazoncat13k", "wiki31k"]:
         if args.decouple:
-            name.append('t'+str(args.group_y_group)+"_decouple")
+            name.append('t'+str(args.group_y_group)+"_detach_"+str(args.detach))
         else:
             name.append('t'+str(args.group_y_group))
 
@@ -124,7 +123,7 @@ parser.add_argument('--seed', type=int, required=False, default=6088)
 parser.add_argument('--epoch', type=int, required=False, default=20)
 parser.add_argument('--dataset', type=str, required=False, default='eurlex4k')
 parser.add_argument('--bert', type=str, required=False, default='bert-base')
-parser.add_argument('--detach', action='store_true')
+parser.add_argument('--detach', type=int, default=0)
 parser.add_argument('--decouple', action='store_true')
 
 parser.add_argument('--max_len', type=int, required=False, default=512)
@@ -166,7 +165,7 @@ if __name__ == '__main__':
     print(f'load {args.dataset} dataset with '
           f'{len(df[df.dataType =="train"])} train {len(df[df.dataType =="test"])} test with {len(label_map)} labels done')
 
-    if args.dataset in ['wiki500k', 'amazon670k', 'eurlex4k']:
+    if args.dataset in ['wiki500k', 'amazon670k', 'eurlex4k', "amazoncat13k", "wiki31k"]:
         group_y = load_group(args.dataset, args.group_y_group)
         _group_y = []
         for idx, labels in enumerate(group_y):
@@ -186,7 +185,7 @@ if __name__ == '__main__':
                          update_count=args.update_count,
                          use_swa=args.swa, swa_warmup_epoch=args.swa_warmup, swa_update_step=args.swa_step)
 
-    if args.eval_model and args.dataset in ['wiki500k', 'amazon670k', 'eurlex4k']:
+    if args.eval_model and args.dataset in ['wiki500k', 'amazon670k', 'eurlex4k', "amazoncat13k", "wiki31k"]:
         print(f'load models/model-{get_exp_name()}.bin')
         testloader = DataLoader(MDataset(df, 'test', model.get_fast_tokenizer(), label_map, args.max_len, 
                                          candidates_num=args.group_y_candidate_num),

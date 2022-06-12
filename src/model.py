@@ -33,7 +33,7 @@ def get_bert(bert_name):
     return bert
 
 class LightXML(nn.Module):
-    def __init__(self, n_labels, group_y=None, bert='bert-base', feature_layers=5, dropout=0.5, update_count=1,
+    def __init__(self, n_labels, group_y=None, bert='bert-base', feature_layers=1, dropout=0.5, update_count=1,
                  candidates_topk=10, 
                  use_swa=True, swa_warmup_epoch=10, swa_update_step=200, hidden_dim=300, decouple=False):
         super(LightXML, self).__init__()
@@ -61,16 +61,14 @@ class LightXML(nn.Module):
             print('hidden dim:',  hidden_dim)
             print('label goup numbers:',  self.group_y_labels)
 
-            self.rm = nn.utils.spectral_norm(nn.Linear(self.feature_layers*self.bert.config.hidden_size, self.feature_layers*self.bert.config.hidden_size))
             self.l0 = nn.Linear(self.feature_layers*self.bert.config.hidden_size, self.group_y_labels)
             # hidden bottle layer
-            self.re = nn.utils.spectral_norm(nn.Linear(self.feature_layers*self.bert.config.hidden_size, self.feature_layers*self.bert.config.hidden_size))
             self.l1 = nn.Linear(self.feature_layers*self.bert.config.hidden_size, hidden_dim)
             self.embed = nn.Embedding(n_labels, hidden_dim)
             nn.init.xavier_uniform_(self.embed.weight)
         else:
             self.l0 = nn.Linear(self.feature_layers*self.bert.config.hidden_size, n_labels)
-
+    
     def get_candidates(self, group_logits, group_gd=None):
         logits = torch.sigmoid(group_logits.detach())
         if group_gd is not None:
@@ -89,7 +87,7 @@ class LightXML(nn.Module):
         return indices, candidates, candidates_scores
 
     def forward(self, input_ids, attention_mask, token_type_ids,
-                labels=None, group_labels=None, candidates=None, detach=False):
+                labels=None, group_labels=None, candidates=None, detach=0):
         is_training = labels is not None
 
         outs = self.bert(
@@ -97,13 +95,16 @@ class LightXML(nn.Module):
             attention_mask=attention_mask,
             token_type_ids=token_type_ids
         )[-1]
-
-        out = torch.cat([outs[-i][:, 0] for i in range(1, self.feature_layers+1)], dim=-1)
+        out = outs[-1][:, 0]
+        bert_out_8 = outs[-5][:, 0]
         out = self.drop_out(out)
-        if self.decouple:
-            group_logits = self.l0(self.relu(self.re(out)) + out)
+        if detach == 1:
+            meta_input = out.detach()
+        elif detach == 3:
+            meta_input = self.drop_out(bert_out_8)
         else:
-            group_logits = self.l0(out)
+            meta_input = out
+        group_logits = self.l0(meta_input)
         if self.group_y is None:
             logits = group_logits
             if is_training:
@@ -140,13 +141,10 @@ class LightXML(nn.Module):
                 bs = be
             labels = torch.stack(new_labels).cuda()
         candidates, group_candidates_scores =  torch.LongTensor(candidates).cuda(), torch.Tensor(group_candidates_scores).cuda()
-
-        if detach:
+        if detach == 2:
             out = out.detach()
-        if self.decouple:
-            emb = self.l1(self.relu(self.rm(out)) + out)
-        else:
-            emb = self.l1(out)
+        
+        emb = self.l1(out)
         embed_weights = self.embed(candidates) # N, sampled_size, H
         emb = emb.unsqueeze(-1)
         logits = torch.bmm(embed_weights, emb).squeeze(-1)
@@ -157,8 +155,7 @@ class LightXML(nn.Module):
             return logits, loss
         else:
             candidates_scores = torch.sigmoid(logits)
-            if not detach:
-                candidates_scores = candidates_scores * group_candidates_scores
+            candidates_scores = candidates_scores * group_candidates_scores
             return group_logits, candidates, candidates_scores
 
     def save_model(self, path):
@@ -232,7 +229,7 @@ class LightXML(nn.Module):
         return total, acc1, acc3, acc5
 
     def one_epoch(self, epoch, dataloader, optimizer,
-                  mode='train', eval_loader=None, eval_step=20000, log=None, detach=False):
+                  mode='train', eval_loader=None, eval_step=20000, log=None, detach=0):
 
         bar = tqdm.tqdm(total=len(dataloader))
         p1, p3, p5 = 0, 0, 0
