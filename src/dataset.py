@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 
 import tqdm
 
-def createDataCSV(dataset):
+def createDataCSV(args, dataset):
     labels = []
     texts = []
     dataType = []
@@ -22,26 +22,25 @@ def createDataCSV(dataset):
 
     assert dataset in name_map
     dataset = name_map[dataset]
-
     fext = '_texts.txt' if dataset == 'Eurlex-4K' else '_raw_texts.txt'
-    with open(f'./data/{dataset}/train{fext}') as f:
+    with open(os.path.join(args.dataset_dir, f'data/{dataset}/train{fext}')) as f:
         for i in tqdm.tqdm(f):
             texts.append(i.replace('\n', ''))
             dataType.append('train')
 
-    with open(f'./data/{dataset}/test{fext}') as f:
+    with open(os.path.join(args.dataset_dir, f'data/{dataset}/test{fext}')) as f:
         for i in tqdm.tqdm(f):
             texts.append(i.replace('\n', ''))
             dataType.append('test')
 
-    with open(f'./data/{dataset}/train_labels.txt') as f:
+    with open(os.path.join(args.dataset_dir, f'data/{dataset}/train_labels.txt')) as f:
         for i in tqdm.tqdm(f):
             for l in i.replace('\n', '').split():
                 label_map[l] = 0
             labels.append(i.replace('\n', ''))
 
 
-    with open(f'./data/{dataset}/test_labels.txt') as f:
+    with open(os.path.join(args.dataset_dir, f'data/{dataset}/test_labels.txt')) as f:
         print(len(label_map))
         for i in tqdm.tqdm(f):
             for l in i.replace('\n', '').split():

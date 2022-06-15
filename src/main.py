@@ -15,25 +15,26 @@ import torch
 from torch.utils.data import DataLoader
 from dataset import MDataset, createDataCSV
 from log import Logger
+import os
 
-def load_group(dataset, group_tree=0):
+def load_group(args, dataset, group_tree=0):
     if dataset == 'wiki500k':
-        return np.load(f'./data/Wiki-500K/label_group{group_tree}.npy', allow_pickle=True)
+        return np.load(os.path.join(args.dataset_dir, f'data/Wiki-500K/label_group{group_tree}.npy'), allow_pickle=True)
     elif dataset == 'amazon670k':
-        return np.load(f'./data/Amazon-670K/label_group{group_tree}.npy', allow_pickle=True)
+        return np.load(os.path.join(args.dataset_dir, f'data/Amazon-670K/label_group{group_tree}.npy'), allow_pickle=True)
     elif dataset == 'eurlex4k':
-        return np.load(f'./data/Eurlex-4K/label_group{group_tree}.npy', allow_pickle=True)
+        return np.load(os.path.join(args.dataset_dir, f'data/Eurlex-4K/label_group{group_tree}.npy'), allow_pickle=True)
     elif dataset == 'wiki31k':
-        return np.load(f'./data/Wiki10-31K/label_group{group_tree}.npy', allow_pickle=True)
+        return np.load(os.path.join(args.dataset_dir, f'data/Wiki10-31K/label_group{group_tree}.npy'), allow_pickle=True)
     elif dataset == 'amazoncat13k':
-        return np.load(f'./data/AmazonCat-13K/label_group{group_tree}.npy', allow_pickle=True)
+        return np.load(os.path.join(args.dataset_dir, f'data/AmazonCat-13K/label_group{group_tree}.npy'), allow_pickle=True)
     
 
 def train(model, df, label_map):
     tokenizer = model.get_tokenizer()
 
     if args.dataset in ['wiki500k', 'amazon670k', 'eurlex4k', "amazoncat13k", "wiki31k"]:
-        group_y = load_group(args.dataset, args.group_y_group)
+        group_y = load_group(args, args.dataset, args.group_y_group)
         train_d = MDataset(df, 'train', tokenizer, label_map, args.max_len, group_y=group_y,
                            candidates_num=args.group_y_candidate_num)#, token_type_ids=token_type_ids)
         test_d = MDataset(df, 'test', tokenizer, label_map, args.max_len, 
@@ -122,6 +123,7 @@ parser.add_argument('--lr', type=float, required=False, default=0.0001)
 parser.add_argument('--seed', type=int, required=False, default=6088)
 parser.add_argument('--epoch', type=int, required=False, default=20)
 parser.add_argument('--dataset', type=str, required=False, default='eurlex4k')
+parser.add_argument('--dataset_dir', type=str, required=False, default='eurlex4k')
 parser.add_argument('--bert', type=str, required=False, default='bert-base')
 parser.add_argument('--detach', type=int, default=0)
 parser.add_argument('--decouple', action='store_true')
@@ -154,7 +156,7 @@ if __name__ == '__main__':
     LOG = Logger('log_'+get_exp_name())
     
     print(f'load {args.dataset} dataset...')
-    df, label_map = createDataCSV(args.dataset)
+    df, label_map = createDataCSV(args, args.dataset)
     if args.valid:
         train_df, valid_df = train_test_split(df[df['dataType'] == 'train'],
                                               test_size=4000,
@@ -166,7 +168,7 @@ if __name__ == '__main__':
           f'{len(df[df.dataType =="train"])} train {len(df[df.dataType =="test"])} test with {len(label_map)} labels done')
 
     if args.dataset in ['wiki500k', 'amazon670k', 'eurlex4k', "amazoncat13k", "wiki31k"]:
-        group_y = load_group(args.dataset, args.group_y_group)
+        group_y = load_group(args, args.dataset, args.group_y_group)
         _group_y = []
         for idx, labels in enumerate(group_y):
             _group_y.append([])
@@ -192,7 +194,7 @@ if __name__ == '__main__':
                                 batch_size=256, num_workers=0, 
                                 shuffle=False)
 
-        group_y = load_group(args.dataset, args.group_y_group)
+        group_y = load_group(args, args.dataset, args.group_y_group)
         validloader = DataLoader(MDataset(df, 'valid', model.get_fast_tokenizer(), label_map, args.max_len, group_y=group_y,
                                           candidates_num=args.group_y_candidate_num),
                                  batch_size=256, num_workers=0, 
